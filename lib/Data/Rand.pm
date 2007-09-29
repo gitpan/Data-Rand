@@ -4,7 +4,7 @@ use warnings;
 use strict;
 use List::Util  ();
 
-use version; our $VERSION = qv('0.0.1');
+use version; our $VERSION = qv('0.0.2');
 
 use base 'Exporter';
 our @EXPORT    = qw( rand_data );
@@ -12,7 +12,7 @@ our @EXPORT_OK = qw( rand_data_string rand_data_array );
 
 sub rand_data {
 	my $options_hr = ref $_[-1] eq 'HASH' ? pop @_ : {}; # last item a hashref or not
-	%{ $options_hr->{'details'} }= ();
+	%{ $options_hr->{'details'} } = ();
 	
     my ( $size, $items_ar ) = @_;
 
@@ -95,7 +95,7 @@ Data::Rand - Efficient cryptographically strong random strings and lists of [un]
 
 =head1 VERSION
 
-This document describes Data::Rand version 0.0.1
+This document describes Data::Rand version 0.0.2
 
 =head1 SYNOPSIS
 

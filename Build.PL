@@ -8,9 +8,8 @@ my $builder = Module::Build->new(
     dist_author         => 'Daniel Muey <http://drmuey.com/cpan_contact.pl>',
     dist_version_from   => 'lib/Data/Rand.pm',
     requires => {
-        'Test::More'         => 0,
-        'Test::Perl::Critic' => 0,
-        'version'            => 0,
+        'Test::More' => 0,
+        'version'    => 0,
     },
     add_to_cleanup      => [ 'Data-Rand-*' ],
 );

@@ -1,5 +1,8 @@
 Revision history for Data-Rand
 
+0.0.2  Sat Sep 29 15:33:25 2007
+		Made perlcritic test optional as per http://rt.cpan.org/Ticket/Display.html?id=29554#txn-364766'
+
 0.0.1  Fri Aug 17 22:34:16 2007
        Initial release.
 

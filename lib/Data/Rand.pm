@@ -2,13 +2,15 @@ package Data::Rand;
 
 use warnings;
 use strict;
-use List::Util  ();
+require Time::HiRes;
 
-use version; our $VERSION = qv('0.0.2');
+use version; our $VERSION = qv('0.0.3');
 
 use base 'Exporter';
 our @EXPORT    = qw( rand_data );
 our @EXPORT_OK = qw( rand_data_string rand_data_array );
+
+my %seen;
 
 sub rand_data {
 	my $options_hr = ref $_[-1] eq 'HASH' ? pop @_ : {}; # last item a hashref or not
@@ -28,8 +30,10 @@ sub rand_data {
     my $time = time;
     $options_hr->{'details'}{'time'} = $time;
 
-    if ( $options_hr->{'use_time_hires'} ) {
-	    require Time::HiRes if !exists $INC{'Time/HiRes.pm'};
+    if ( exists $options_hr->{'use_time_hires'} && !$options_hr->{'use_time_hires'}) {
+        $options_hr->{'details'}{'no_hires'} = 1;   
+    }
+    else {
 	    my ($sec, $mic) = Time::HiRes::gettimeofday();
 	    $options_hr->{'details'}{'hires'} = [$sec, $mic];
 	    $time = $sec ^ $mic;
@@ -49,7 +53,7 @@ sub rand_data {
     $options_hr->{'details'}{'using_default_list'} = $def_list;
     $options_hr->{'details'}{'items'} = [ @items ];
 
-    my @chars = List::Util::shuffle( @items );
+    my @chars = @items; # List::Util::shuffle( @items );
 
     if ( $options_hr->{'use_unique_list'} && !$def_list ) {
         my %uniq;
@@ -73,6 +77,18 @@ sub rand_data {
         push @data, $chars[ $index ];
     }
 
+    if (!$options_hr->{'skip_seen_check'} && exists $seen{join('', @data)}) {
+        $options_hr->{'seen_count'}++;
+        if ($options_hr->{'seen_count'} < 5) {
+            @data = rand_data(@_, $options_hr);
+        }
+        else {
+            # repeated a lot, probably indicate limits of arguments, warn die handler?
+        }
+    }    
+
+    $seen{join('', @data)}++ if !$options_hr->{'skip_seen_check'};
+    
     return wantarray ? @data : join('', @data);
 }
 
@@ -91,31 +107,32 @@ __END__
 
 =head1 NAME
 
-Data::Rand - Efficient cryptographically strong random strings and lists of [un]given length and data.
+Data::Rand - Random string and list utility
 
 =head1 VERSION
 
-This document describes Data::Rand version 0.0.2
+This document describes Data::Rand version 0.0.3
 
 =head1 SYNOPSIS
 
     use Data::Rand;
 
 	my $rand_32_str = rand_data();
-
+    
     my $rand_64_str = rand_data(64);
-
-	my @contestants = rand_data( 2, \@studio_audience, { 'do_not_repeat_index' => 1 } ); 
-
+    
+ 	my @contestants = rand_data( 2, \@studio_audience, { 'do_not_repeat_index' => 1 } ); 
+    
 	my $doubledigit = rand_data( 2, [0 .. 9] );
 	
 	my @rolled_dice = rand_data( 2, [1 .. 6] );
-
+    
     my $pickanumber = rand_data( 1, [1 .. 1000] );
+
 
 =head1 DESCRIPTION
 
-Simple interface to efficiently get cryptographically strong randomized data.
+Simple interface to easily get randomized data.
 
 =head1 EXPORT
 
@@ -145,7 +162,9 @@ keys and values are described below, unless otherwise noted options are booleans
 
 =item * 'use_time_hires'
 
-Have srand calculation use high resolution time data instead of normal time(). Makes for even stronger randomness for crytographical purposes. 
+Have srand calculation use high resolution time data instead of normal time(). Makes for even stronger randomness.
+
+This is on by default, too disable it set it to false.
 
 =item * 'use_unique_list' 
 
@@ -181,6 +200,20 @@ or even:
 
 Caveat: This also increases calculation time since it has to see if 
 a randomly chosen index has already been used and if so try again. 
+
+=item * 'skip_seen_check'
+
+Sometimes arguments given have a better probability of duplicates. By way of hyperbole:
+
+   rand_data(1,[qw(a b c)]); 
+   
+Every time you call that you have approximately a 33 1/3% chance of a repeat.
+
+To alleviate that, Data::Rand keeps track of what its produced already and tries again to get a new values. 
+
+To avoid loops where this simply isn't possible (E.g. calling that code above 100 times) it will only re-try a few times before giving up and returning a duplicate.
+
+If you don't want that overhead, simply set this option to true and that check will not be performed.
 
 =item * 'srand_seeder_coderef'
 
@@ -232,7 +265,7 @@ Data::Rand requires no configuration files or environment variables.
 
 =head1 DEPENDENCIES
 
-L<List::Util> to shuffle the array of items to use for the randomized data.
+L<Time::HiRes>
 
 =head1 INCOMPATIBILITIES
 
@@ -247,6 +280,14 @@ C<bug-data-rand@rt.cpan.org>, or through the web interface at
 L<http://rt.cpan.org>.
 
 =head1 TODO
+
+Gratefully apply helpful suggestions to make this module better
+
+Re-add tests I had worked up that went away with a failed HD
+
+Make randomness stronger but stay fast.
+
+Achieve no dupes w/out lookup check.
 
 May add these behaviorial booleans to option hashref depending on feedback:
 

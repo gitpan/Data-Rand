@@ -2,15 +2,18 @@ package Data::Rand;
 
 use warnings;
 use strict;
-require Time::HiRes;
 
-use version; our $VERSION = qv('0.0.3');
+use version; our $VERSION = qv('0.0.4');
 
 use base 'Exporter';
 our @EXPORT    = qw( rand_data );
 our @EXPORT_OK = qw( rand_data_string rand_data_array );
 
-my %seen;
+sub seed_calc_with {
+    require Time::HiRes;
+    my ($sec, $mic) = Time::HiRes::gettimeofday();
+    srand($sec ^ $mic ^ $$ ^ shift() || rand( 999_999_999_999_999 ));    
+}
 
 sub rand_data {
 	my $options_hr = ref $_[-1] eq 'HASH' ? pop @_ : {}; # last item a hashref or not
@@ -18,77 +21,56 @@ sub rand_data {
 	
     my ( $size, $items_ar ) = @_;
 
-    my $seeder = ref $options_hr->{'srand_seeder_coderef'} eq 'CODE' 
-        ? $options_hr->{'srand_seeder_coderef'} : sub { return int( rand( 999_999_999_999_999 ) ); };
-
     $size = 32 if !defined $size || $size eq '0' || $size !~ m{ \A \d+ \z }xms;
     $options_hr->{'details'}{'size'} = $size;
 
-    my $entropy = int( $seeder->() ) || int( rand( 999_999_999_999_999 ) );
-    $options_hr->{'details'}{'entropy'} = $entropy;
-
-    my $time = time;
-    $options_hr->{'details'}{'time'} = $time;
-
-    if ( exists $options_hr->{'use_time_hires'} && !$options_hr->{'use_time_hires'}) {
-        $options_hr->{'details'}{'no_hires'} = 1;   
-    }
-    else {
-	    my ($sec, $mic) = Time::HiRes::gettimeofday();
-	    $options_hr->{'details'}{'hires'} = [$sec, $mic];
-	    $time = $sec ^ $mic;
-    }
-
-    srand( $time ^ $$ ^ $entropy );
-
     my @items = ( 0 .. 9, 'A' .. 'Z', 'a' .. 'z' );
-    my $def_list = 1;
+    $options_hr->{'details'}{'using_default_list'} = 1;
 
     if ( ref $items_ar eq 'ARRAY' ) {
         if ( @{ $items_ar } ) {
 	        @items = @{ $items_ar };
-	        $def_list = 0;
+	        $options_hr->{'details'}{'using_default_list'} = 0;
         }	
     }
-    $options_hr->{'details'}{'using_default_list'} = $def_list;
     $options_hr->{'details'}{'items'} = [ @items ];
 
-    my @chars = @items; # List::Util::shuffle( @items );
-
-    if ( $options_hr->{'use_unique_list'} && !$def_list ) {
+    if ( $options_hr->{'use_unique_list'} && !$options_hr->{'details'}{'using_default_list'} ) {
         my %uniq;
-	    @chars = map { $uniq{$_}++ == 0 ? $_ : () } @_; # see List::MoreUtils::uniq() #left prec, reverse @_ right prec
+	    @items = map { $uniq{$_}++ == 0 ? $_ : () } @items; # see List::MoreUtils::uniq() #left prec, reverse @_ right prec
     }
 
-    $size = @chars if $size > @chars && $options_hr->{'do_not_repeat_index'};
-
+    $size = @items if $size > @items && $options_hr->{'do_not_repeat_index'};
+    my $len = scalar @items;
+    
+    my $get_random_index = sub { rand shift() };
+    
+    $options_hr->{'details'}{'using_default_index_picker'} = 1;
+    if ( ref $options_hr->{'get_random_index'} eq 'CODE' ) {
+        $options_hr->{'details'}{'using_default_index_picker'} = 0; 
+        $get_random_index = $options_hr->{'get_random_index'};
+    }
+    
     my @data;
     my %used;
     
+    PART:
     for ( 1 .. $size ) {
-	    my $index = int rand scalar @chars;
+	    my $index = int( $get_random_index->($len) ); # negatives ok so no abs()
         if( $options_hr->{'do_not_repeat_index'} ) {
+            my $try = 0;
+            TRY:
 		    while ( exists $used{ $index } ) {
-			    $index = int rand scalar @chars;
+		        $try++;
+			    $index = int( $get_random_index->($len) ); # negatives ok so no abs()
+			    last TRY if $try > $size; # keep a custom index fetcher from causing infinite loop
 		    }
 		    $used{ $index }++;
         }
 
-        push @data, $chars[ $index ];
+        push @data, $items[ $index ];
     }
 
-    if (!$options_hr->{'skip_seen_check'} && exists $seen{join('', @data)}) {
-        $options_hr->{'seen_count'}++;
-        if ($options_hr->{'seen_count'} < 5) {
-            @data = rand_data(@_, $options_hr);
-        }
-        else {
-            # repeated a lot, probably indicate limits of arguments, warn die handler?
-        }
-    }    
-
-    $seen{join('', @data)}++ if !$options_hr->{'skip_seen_check'};
-    
     return wantarray ? @data : join('', @data);
 }
 
@@ -111,28 +93,42 @@ Data::Rand - Random string and list utility
 
 =head1 VERSION
 
-This document describes Data::Rand version 0.0.3
+This document describes Data::Rand version 0.0.4
 
 =head1 SYNOPSIS
 
     use Data::Rand;
 
-	my $rand_32_str = rand_data();
-    
+    my $rand_32_str = rand_data();
     my $rand_64_str = rand_data(64);
-    
- 	my @contestants = rand_data( 2, \@studio_audience, { 'do_not_repeat_index' => 1 } ); 
-    
-	my $doubledigit = rand_data( 2, [0 .. 9] );
-	
-	my @rolled_dice = rand_data( 2, [1 .. 6] );
-    
+    my @contestants = rand_data( 2, \@studio_audience, { 'do_not_repeat_index' => 1 } ); 
+    my $doubledigit = rand_data( 2, [0 .. 9] );
+    my @rolled_dice = rand_data( 2, [1 .. 6] );
     my $pickanumber = rand_data( 1, [1 .. 1000] );
-
 
 =head1 DESCRIPTION
 
-Simple interface to easily get randomized data.
+Simple interface to easily get a string or array made of randomly chosen pieces of a set of data.
+
+=head1 How Random is "Random"?
+
+That depends much on you.
+
+Data::Rand works by building a string or array of the given length from a list of items that are "randomly" chosen, by default, using perl's built in L<rand>().
+
+You can affect L<rand>()'s effectiveness by calling L<srand>() or L</seed_calc_with>() as you need.
+
+You can also override the use of L<rand>() internally altogether with something as mathmatically random as you like.
+
+You can pass arguments as well which will affect how likley a not-so-random seeming pattern will emerge (for example: rand_data(1,['a']) will always return 'a', which is always predictable)
+
+The tests for this module call rand_data() without calling L<srand>() explicitly, with no arguments (IE out of the box defaults) 100,000 times and fails if there are any duplicates.
+
+There's an optional test that does it 1,000,000 times but its not done by default simply for the sake of time and memory (for the test's lookup hash). From version zero-zero-four on new releases of this module must pass that test before being published.
+
+So if that's "random" enough for you, well, there you have it!
+
+If not, you can always make it more "truly" random as per the POD below.
 
 =head1 EXPORT
 
@@ -154,17 +150,11 @@ Takes 0 to 3 arguments:
 
 =item 2) array ref of parts (default if not given or invalid is 0 .. 9 and upper and lower case a-z)
 
-=item 3) hashref of behavioral options
+=item 3) hashref of behavioral options (this one can also be passed as the only argument or the second argument so long as its the *last* argument)
 
 keys and values are described below, unless otherwise noted options are booleans which default to false
 
 =over
-
-=item * 'use_time_hires'
-
-Have srand calculation use high resolution time data instead of normal time(). Makes for even stronger randomness.
-
-This is on by default, too disable it set it to false.
 
 =item * 'use_unique_list' 
 
@@ -201,33 +191,16 @@ or even:
 Caveat: This also increases calculation time since it has to see if 
 a randomly chosen index has already been used and if so try again. 
 
-=item * 'skip_seen_check'
+=item * 'get_random_index'
 
-Sometimes arguments given have a better probability of duplicates. By way of hyperbole:
+This should be a code ref that accepts one argument, the number of items we have to choose from, and returns an index chosen at random (however you choose to define "random")
 
-   rand_data(1,[qw(a b c)]); 
-   
-Every time you call that you have approximately a 33 1/3% chance of a repeat.
+    sub {
+        my ($length) = @_;
+        return Crypt::Random::makerandom_itv( 'Lower' => 0, 'Upper' => $length, ...); 
+    }
 
-To alleviate that, Data::Rand keeps track of what its produced already and tries again to get a new values. 
-
-To avoid loops where this simply isn't possible (E.g. calling that code above 100 times) it will only re-try a few times before giving up and returning a duplicate.
-
-If you don't want that overhead, simply set this option to true and that check will not be performed.
-
-=item * 'srand_seeder_coderef'
-
-See "SEEDING RANDOM GENERATOR"
-
-This sets the internal function used to generate part of the srand calculation.
-
-It's value must be a coderef or its ignored. It must return an int() or its return value is ignored.
-
-A few examples in line with srand perldoc:
-
-    sub { return unpack '%L*', `ps axww | gzip` } 
-
-    \&Math::TrulyRandom::truly_random_value
+Note: The above example (w/ Strong => 0 (IE read() is not being blocked on /dev/random)) benchmarked appx 570 times as slow as the default L<rand>() based solution but its much more truly random.
 
 =back
 
@@ -247,13 +220,25 @@ Same args as rand_data(). The difference is that it always returns an array rega
     my @rand_data = rand_data_array( @rand_args ); # @rand_data contains the random items
     my $rand_data = rand_data_array( @rand_args ); # $rand_data is an array ref to the list of random items
 
-=head1 SEEDING RANDOM GENERATOR
+=head2 seed_calc_with()
 
-Internally it uses srand as per the docs and a part of the seed calculation can be changed to your needs.
+This is a simple shortcut function you can use to call L<srand>() for you with a pre-done calculation as outlined below. If this does not do what you like use L<srand>() directly.
 
-If a random int between 0 and 999,999,999,999,999 is not what you want for that part of the calulation, feel free to change it via the hashref argument described above.
+It brings in L<Time::HiRes> for you if needed and then calls L<srand>() like so:
 
-Note: this is only *one* component in the srand arg calculation *NOT* the entire srand() arg, so don't panic :)
+    srand($hires_time, $hires_micro_seconds, $$, 'YOUR ARGUEMENT HERE' || rand( 999_999_999_999_999));
+
+You don't have to call it of course but here are some examples if you choose to:
+
+    seed_calc_with();                                  # same as seed_calc_with( rand( 999_999_999_999_999 ) );
+    seed_calc_with( rand( 999_999_999_999_999 ) );     # same as seed_calc_with();
+    seed_calc_with( unpack '%L*', `ps axww | gzip` );
+    seed_calc_with( Math::TrulyRandom::truly_random_value() );
+    seed_calc_with( Crypt::Random::makerandom(...) ); 
+
+Its not exportable on purpose to discourage blindly using it since calling L<srand>() improperly can result in L<rand>()'s result being less random.
+
+See L<srand> and L<rand> for more information.
 
 =head1 DIAGNOSTICS
 
@@ -265,7 +250,7 @@ Data::Rand requires no configuration files or environment variables.
 
 =head1 DEPENDENCIES
 
-L<Time::HiRes>
+L</seed_calc_with>() brings in L<Time::HiRes>
 
 =head1 INCOMPATIBILITIES
 
@@ -281,19 +266,15 @@ L<http://rt.cpan.org>.
 
 =head1 TODO
 
-Gratefully apply helpful suggestions to make this module better
-
 Re-add tests I had worked up that went away with a failed HD
-
-Make randomness stronger but stay fast.
-
-Achieve no dupes w/out lookup check.
 
 May add these behaviorial booleans to option hashref depending on feedback:
 
     'return_on_bad_args' # do not use defaults, just return;
     'carp_on_bad_args'   # carp() about what args are bad and why
     'croak_on_bad_args'  # same as carp but fatal
+
+Gratefully apply helpful suggestions to make this module better
 
 =head1 AUTHOR
 
